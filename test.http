@@ -1,0 +1,91 @@
+###
+GET http://localhost:9200/_search"
+{
+    "query": {
+        "queryString": {
+            "match-all"
+        }
+    }
+}
+
+###
+GET http://localhost:9200/document/create/e56de063b0c5c1aa3fb533fd7b5fc4528941f686792fb3eb017535df320e7602
+
+###
+get http://localhost:9200/documents/_doc/42
+
+###
+POST http://localhost:9200/documents/_doc/42
+content-type: application/json
+
+{
+    "uid": "42",
+    "message": "Hello World!"
+}
+
+###
+# get all records for an index
+GET http://localhost:9200/user/_search/?size=1000
+content-type: application/json
+
+{
+    "query": {
+        "match_all": {}
+    }
+}
+
+###
+# get unique records from a field
+GET http://localhost:9200/user/_search
+content-type: application/json
+
+{
+    "size": 0,
+    "aggs": {
+        "unique_author": {
+            "terms": {
+                "field": "author.keyword",
+                "size": 1000
+            }
+        }
+    }
+}
+
+###
+GET http://localhost:9200/norm/_search
+content-type: application/json
+
+{
+    "query": {
+        "match" : {
+            "places.values.length" : 0
+        }
+    }
+}
+
+###
+# get unique records from a field
+GET http://localhost:9200/norm/_search
+content-type: application/json
+
+{
+    "size": 0,
+    "aggs": {
+            "terms": {
+                "field": "places",
+                "size": 1000
+            }
+        }
+    }
+}
+
+###
+# get user
+GET http://localhost:9200/user/8538a7f4513b04360cdd3d675df13110b54308d4ec71a9b30ffa6982e59beda0
+
+###
+# get count from user index
+GET http://localhost:9200/user/_count
+
+###
+DELETE http://localhost:9200/_all

@@ -1,0 +1,62 @@
+
+const path = require('path');
+const fs = require('fs-extra');
+const request = require('request-promise');
+const { Client } = require('@elastic/elasticsearch');
+const { of, from, EMPTY  } = require('rxjs');
+const { map, delay, tap, concatMap, catchError } = require('rxjs/operators');
+
+const client = new Client({
+    node: 'http://localhost:9200',
+    maxRetries: 3,
+    requestTimeout: 60000
+});
+
+const basedir = path.resolve(__dirname);
+const outputdir = path.join(basedir, 'data/output');
+
+const indexData = async function(index, uid, data) {  
+    try {
+        await client.index({
+            index: index,
+            id: uid,
+            body: data
+        });
+    }
+    catch(e) {
+        console.log(`index error - ${e}`);
+    }
+};
+
+const loadData = () => {
+    let ctr = 1;
+    let filename = '';
+    from(fs.readdir(outputdir)).pipe(
+        flatMap(files => files),
+        concatMap(file => {
+            filename = file;
+            return from(fs.readJson(`${outputdir}/${file}`)).pipe(delay(100));
+        }),
+        map(j => {
+            console.log(`processing document: uid [${j.uid}] count [${ctr++}] filename [${filename}]`);
+            let document = { uid: j.uid, system_timestamp: j.system_timestamp, type: j.type, filename: filename };
+
+            indexData('document', j.uid, document);
+            indexData('doc', j.uid, j.doc.geo_registration);
+            indexData('meta', j.uid, j.meta.geo_registration);
+            indexData('norm', j.uid, j.norm.geo_registration);
+            indexData('user', j.uid, {"author": j.norm.author});
+        }),
+        catchError(err => {
+            console.log('**** error caught reading json ****', err);
+            return of(EMPTY)
+        })
+    )
+    .subscribe();
+};
+
+console.log('=======================================================================');
+console.log('processing started');
+console.log('=======================================================================');
+
+loadData();
