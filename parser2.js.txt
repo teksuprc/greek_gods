@@ -15,6 +15,212 @@ const client = new Client({
 const basedir = path.resolve(__dirname);
 const outputdir = path.join(basedir, 'data/output');
 
+
+
+const default_port = 9200;
+
+
+const sendPut = async function(index, uid, data) {
+    let opt = {
+        method: 'PUT',
+        uri: `http://localhost:${default_port}/${index}/_doc/${uid}`,
+        body: data,
+        json: true
+    };
+    request(opt).then(r => console.log('*')).catch(e => console.log(`request error - ${e}`));
+};
+
+const indexData = async function(index, uid, data) {  
+    try {
+        await client.index({
+            index: index,
+            id: uid,
+            body: data
+        });
+    }
+    catch(e) {
+        console.log(`index error - ${e}`);
+    }
+};
+
+const loadData_to_ESIndex = (j) => {
+    console.log(`processing document: uid [${j.uid}] count [${ctr++}] filename [${filename}]`);
+    let document = { uid: j.uid, system_timestamp: j.system_timestamp, type: j.type, filename: filename };
+
+    indexData('document', j.uid, document);
+    indexData('doc', j.uid, j.doc.geo_registration);
+    indexData('meta', j.uid, j.meta.geo_registration);
+    indexData('norm', j.uid, j.norm.geo_registration);
+    indexData('user', j.uid, {"author": j.norm.author});
+    return j;
+};
+
+const loadData = () => {
+    fs.readdir(outputdir,(err, files) => {
+        if(err) {
+            console.log(`failed to read files from basedir [${basedir}] - ${err}`);
+            return;
+        }
+
+        let ctr = 0;
+        for(filename of files) {
+            console.log(`processing file [${filename}]`);
+            ctr++;
+
+            // read the json
+            const json_file = `${outputdir}/${filename}`;
+            fs.readJson(json_file)
+                .then(j => {
+                    let document = {
+                        uid: j.uid,
+                        system_timestamp: j.system_timestamp,
+                        type: j.type,
+                        filename: filename,
+                        row: ctr
+                    };
+
+                        console.log(`processing document [${j.uid}]`);
+                        indexData('document', j.uid, document);
+                        indexData('doc', j.uid, j.doc.geo_registration);
+                        indexData('meta', j.uid, j.meta.geo_registration);
+                        indexData('norm', j.uid, j.norm.geo_registration);
+                        if(j.norm.author)
+                            indexData('user', j.uid, {"author": j.norm.author});
+            })
+            .catch(err => {
+                console.log(`failed to read json file: ${err}`);
+            });
+        }
+    });
+};
+
+const get_places_stats = (j) => {
+    console.log(`processing document: uid [${j.uid}] count [${ctr++}] filename [${filename}]`);
+    total_doc_places += j.doc.geo_registration.places.length;
+    total_meta_places += j.meta.geo_registration.places.length;
+    total_norm_places += j.norm.geo_registration.places.length;
+
+    let stat = {
+        filename: filename,
+        type: j.type,
+        doc: {
+            places: j.doc.geo_registration.places.length
+        },
+        meta: {
+            places: j.meta.geo_registration.places.length
+        },
+        norm: {
+            places: j.norm.geo_registration.places.length
+        }
+    };
+    return stat;
+};
+
+const get_languages_stats = (j) => {
+    console.log(`processing document: uid [${j.uid}] count [${ctr++}] filename [${filename}]`);
+    total_doc_langs += j.doc.geo_registration.detected_languages.length;
+    total_meta_langs += j.meta.geo_registration.detected_languages.length;
+    total_norm_langs += j.norm.geo_registration.detected_languages.length;
+
+    let stat = {
+        filename: filename,
+        type: j.type,
+        doc: {
+            langs: j.doc.geo_registration.detected_languages
+        },
+        meta: {
+            langs: j.meta.geo_registration.detected_languages
+        },
+        norm: {
+            langs: j.norm.geo_registration.detected_languages
+        }
+    };
+    return stat;
+};
+
+const read_places_stats = (title, directory) => {
+    let statsfile = `${outputdir}/${title}_places_stats.json`;
+    let stats = {};
+    let wstream = fs.createWriteStream(statsfile, {encoding: 'utf-8'});
+    wstream.write('{\n\t"stats": [\n');
+
+    from(fs.readdir(directory)).pipe(
+        flatMap(files => files),
+        concatMap(file => {
+            filename = file;
+            return from(fs.readJson(`${directory}/${file}`)).pipe(delay(2));
+        }),
+        map(j => get_places_stats(j)),
+        map(stat => wstream.write(`\t\t${JSON.stringify(stat)},\n`)),
+        catchError(err => {
+            console.log('**** error caught ****', err);
+            return of(EMPTY)
+        })
+    )
+    .subscribe(
+        () => {},
+        (err) => {console.log(err)},
+        () => {
+            console.log('complete');
+            wstream.write('\t],\n');
+            wstream.write(`"total_doc_places": ${total_doc_places},\n`);
+            wstream.write(`"total_meta_places": ${total_meta_places},\n`);
+            wstream.write(`"total_norm_places": ${total_norm_places}\n`);
+            wstream.write('}');
+            wstream.end();
+        },
+    );
+};
+
+const read_languages_stats = (title, directory) => {
+    let statsfile = `${outputdir}/${title}_langs_stats.json`;
+    let stats = {};
+    let wstream = fs.createWriteStream(statsfile, {encoding: 'utf-8'});
+    wstream.write('{\n\t"stats": [\n');
+
+    from(fs.readdir(directory)).pipe(
+        flatMap(files => files),
+        concatMap(file => {
+            filename = file;
+            return from(fs.readJson(`${directory}/${file}`)).pipe(delay(2));
+        }),
+        map(j => get_languages_stats(j)),
+        map(stat => wstream.write(`\t\t${JSON.stringify(stat)},\n`)),
+        catchError(err => {
+            console.log('**** error caught ****', err);
+            return of(EMPTY)
+        })
+    )
+    .subscribe(
+        () => {},
+        (err) => {console.log(err)},
+        () => {
+            console.log('complete');
+            wstream.write('\t],\n');
+            wstream.write(`"total_doc_langs": ${total_doc_langs},\n`);
+            wstream.write(`"total_meta_langs": ${total_meta_langs},\n`);
+            wstream.write(`"total_norm_langs": ${total_norm_langs}\n`);
+            wstream.write('}');
+            wstream.end();
+        },
+    );
+};
+
+const read_large_json = () => {
+    let wstream = fs.createWriteStream(`${outputdir}/apollo_example_data.jsonl`, {encoding: 'utf-8'});
+    fs.readJson(path.join(basedir, 'data/samples/apollo_example_data.json'))
+        .then(jlob => {
+            for(let i of Object.keys(jlob)) {
+                console.log(i);
+                //fs.writeJsonSync(`${outputdir2}/apollo_example_data_${i}.json`, jlob[i]._source);
+                wstream.write(`${JSON.stringify(jlob[i]._source)}\n`);
+            }
+            wstream.end();
+        });
+};
+
+
+
 const indexData = async function(index, uid, data) {  
     try {
         await client.index({
